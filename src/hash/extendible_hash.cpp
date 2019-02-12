@@ -10,14 +10,21 @@ namespace cmudb {
  * array_size: fixed array size for each bucket
  */
 template <typename K, typename V>
-ExtendibleHash<K, V>::ExtendibleHash(size_t size) {}
+ExtendibleHash<K, V>::ExtendibleHash(size_t size): size(size){
+    global_depth = 0;
+    buckets.emplace_back();
+    directory.emplace_back(& buckets.front());
+}
 
 /*
  * helper function to calculate the hashing address of input key
  */
 template <typename K, typename V>
 size_t ExtendibleHash<K, V>::HashKey(const K &key) {
-  return 0;
+    const size_t hash = hash_function(key);
+    const uint mask = (1u << (unsigned)global_depth) - 1;
+    const size_t masked_hash = hash & mask;
+    return masked_hash;
 }
 
 /*
@@ -26,7 +33,7 @@ size_t ExtendibleHash<K, V>::HashKey(const K &key) {
  */
 template <typename K, typename V>
 int ExtendibleHash<K, V>::GetGlobalDepth() const {
-  return 0;
+    return global_depth;
 }
 
 /*
@@ -35,7 +42,8 @@ int ExtendibleHash<K, V>::GetGlobalDepth() const {
  */
 template <typename K, typename V>
 int ExtendibleHash<K, V>::GetLocalDepth(int bucket_id) const {
-  return 0;
+    const Bucket * bucket = directory[bucket_id];
+    return bucket->local_depth;
 }
 
 /*
@@ -43,7 +51,7 @@ int ExtendibleHash<K, V>::GetLocalDepth(int bucket_id) const {
  */
 template <typename K, typename V>
 int ExtendibleHash<K, V>::GetNumBuckets() const {
-  return 0;
+    return int(buckets.size());
 }
 
 /*
@@ -51,7 +59,20 @@ int ExtendibleHash<K, V>::GetNumBuckets() const {
  */
 template <typename K, typename V>
 bool ExtendibleHash<K, V>::Find(const K &key, V &value) {
-  return false;
+
+    mutex.lock();
+    const size_t bucket_id = HashKey(key);
+    const Bucket * bucket = directory[bucket_id];
+    const std::list<Element> & elements = bucket->elements;
+    for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
+        if (iterator -> key == key) {
+            value = iterator -> value;
+            mutex.unlock();
+            return true;
+        }
+    }
+    mutex.unlock();
+    return false;
 }
 
 /*
@@ -60,8 +81,74 @@ bool ExtendibleHash<K, V>::Find(const K &key, V &value) {
  */
 template <typename K, typename V>
 bool ExtendibleHash<K, V>::Remove(const K &key) {
-  return false;
+    mutex.lock();
+    const size_t bucket_id = HashKey(key);
+    Bucket * bucket = directory[bucket_id];
+    std::list<ExtendibleHash::Element> & elements = bucket->elements;
+    for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
+        if (iterator -> key == key) {
+            elements.erase(iterator);
+            mutex.unlock();
+            return true;
+        }
+    }
+    mutex.unlock();
+    return false;
 }
+
+template <typename K, typename V>
+void ExtendibleHash<K, V>::HandleOverflowBucket(cmudb::ExtendibleHash<K, V>::Bucket *bucket) {
+    std::list<Element> & elements = bucket->elements;
+    if (elements.size() <= size) return;
+
+    // adjust the directory when local_depth == global_depth
+    if (bucket->local_depth == global_depth) {
+        global_depth += 1;
+
+        // double the size of directory and set the directory pointer to point to the same position as companion pointer
+        const size_t directory_size = directory.size();
+        directory.resize(directory_size*2);
+
+        for (size_t i = 0; i < directory_size; i++) {
+            directory[i + directory_size] = directory[i];
+        }
+    }
+
+    // increase local depth of bucket
+    bucket->local_depth += 1;
+
+    // create companion bucket
+    buckets.emplace_back();
+    Bucket & companion_bucket = buckets.back();
+    companion_bucket.local_depth = bucket->local_depth;
+
+    // make the directory to point to bucket vs companion bucket
+    for (size_t i = directory.size()/2; i < directory.size(); i++) {
+        if (directory[i] == bucket) {
+            directory[i] = & companion_bucket;
+        }
+    }
+
+    // put the elements in bucket into bucket vs companion bucket
+    for (auto iterator = elements.begin(); iterator != elements.end();) {
+        const size_t bucket_id = HashKey(iterator->key);
+        const Bucket* target_bucket = directory[bucket_id];
+        if (target_bucket == bucket) {
+            iterator++;
+        } else {
+            auto prev_iterator = iterator;
+            iterator++;
+            companion_bucket.elements.emplace_back(*prev_iterator);
+            elements.erase(prev_iterator);
+        }
+    }
+
+    // check again if either of bucket/companion_bucket is overflow
+    HandleOverflowBucket(bucket);
+    HandleOverflowBucket(&companion_bucket);
+
+}
+
 
 /*
  * insert <key,value> entry in hash table
@@ -69,7 +156,34 @@ bool ExtendibleHash<K, V>::Remove(const K &key) {
  * global depth
  */
 template <typename K, typename V>
-void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {}
+void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {
+    mutex.lock();
+
+
+    const size_t bucket_id = HashKey(key);
+    Bucket * bucket = directory[bucket_id];
+    std::list<Element> & elements = bucket->elements;
+
+    // check if the key exists in the hashtable
+    for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
+        if (iterator -> key == key) {
+            iterator->value = value;
+            mutex.unlock();
+            return;
+        }
+    }
+
+    // insert the key into current bucket
+    elements.emplace_back(key, value);
+
+    // handle the overflow of buckets
+    HandleOverflowBucket(bucket);
+
+    mutex.unlock();
+
+
+
+}
 
 template class ExtendibleHash<page_id_t, Page *>;
 template class ExtendibleHash<Page *, std::list<Page *>::iterator>;
