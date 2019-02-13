@@ -11,26 +11,41 @@
 
 #include "buffer/replacer.h"
 #include "hash/extendible_hash.h"
+#include <unordered_map>
+#include <mutex>
 
 namespace cmudb {
 
 template <typename T> class LRUReplacer : public Replacer<T> {
+
+    struct Node {
+        Node* prev = nullptr;
+        Node* next = nullptr;
+        T value;
+    };
+
 public:
-  // do not change public interface
-  LRUReplacer();
+    // do not change public interface
+    LRUReplacer();
 
-  ~LRUReplacer();
+    ~LRUReplacer();
 
-  void Insert(const T &value);
+    void Insert(const T &value);
 
-  bool Victim(T &value);
+    bool Victim(T &value);
 
-  bool Erase(const T &value);
+    bool Erase(const T &value);
 
-  size_t Size();
+    size_t Size();
 
 private:
-  // add your member variables here
+    // add your member variables here
+    Node* head;
+    Node* tail;
+    std::unordered_map<T, Node*> node_map;
+    std::mutex mutex;
+
+
 };
 
 } // namespace cmudb
