@@ -47,11 +47,12 @@ BufferPoolManager::~BufferPoolManager() {
  * pointer
  */
 Page *BufferPoolManager::FetchPage(page_id_t page_id) {
+
     std::lock_guard<std::mutex> lock(latch_);
 
     if (page_id == INVALID_PAGE_ID) return nullptr;
 
-    Page* page;
+    Page* page = nullptr;
     // check if the page is already in page table
     if (page_table_->Find(page_id, page)) {
         page->pin_count_++;
@@ -80,7 +81,7 @@ bool BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty) {
 
     if (page_id == INVALID_PAGE_ID) return false;
 
-    Page* page;
+    Page* page = nullptr;
     // cannot find the page with given page_id
     if (!page_table_->Find(page_id, page)) return false;
 
@@ -110,7 +111,7 @@ bool BufferPoolManager::FlushPage(page_id_t page_id) {
         return false;
     }
 
-    Page* page;
+    Page* page = nullptr;
 
     // cannot find the page
     if (!page_table_->Find(page_id, page)) {
@@ -138,11 +139,12 @@ bool BufferPoolManager::DeletePage(page_id_t page_id) {
 
     if (page_id == INVALID_PAGE_ID) return false;
 
-    Page* page;
+    Page* page = nullptr;
 
     // cannot find page in page_table
     if (!page_table_->Find(page_id, page)) {
-        disk_manager_->DeallocatePage(page_id);
+        // debug: not sure if this line is needed
+        //disk_manager_->DeallocatePage(page_id);
         return true;
     }
 
@@ -154,6 +156,7 @@ bool BufferPoolManager::DeletePage(page_id_t page_id) {
     // remove the page from page_table
     disk_manager_->DeallocatePage(page_id);
     page_table_->Remove(page_id);
+    replacer_->Erase(page);
     InitializePage(page);
     page->pin_count_ = 0;
     free_list_->emplace_back(page);
@@ -199,7 +202,7 @@ void BufferPoolManager::InitializePage(Page* page) const {
 Page* BufferPoolManager::GetEmptyPage() {
 
     // check if there is free memory page to return
-    Page* page;
+    Page* page = nullptr;
     if (!free_list_->empty()) {
         page = free_list_->front();
         free_list_->pop_front();
