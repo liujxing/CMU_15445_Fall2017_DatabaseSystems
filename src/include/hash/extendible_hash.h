@@ -34,6 +34,11 @@ class ExtendibleHash : public HashTable<K, V> {
         std::list<Element> elements;
     };
 
+    struct BucketChain {
+        std::list<Bucket> bucket_list;
+                
+    };
+
 public:
     // constructor
     ExtendibleHash(size_t size);
@@ -51,11 +56,16 @@ public:
 private:
     // add your own member variables here
     const size_t size; // size of each bucket
-    std::mutex mutex; // mutex for access control
+
+
     int global_depth; // global depth
     std::list<Bucket> buckets; // local depth and bucket elements
     std::vector<Bucket*> directory; // directory mapping hashcode to buckets
+
     const std::hash<K> hash_function; // hash function to convert key into hash code
+
+    std::mutex mutex; // mutex for access control
+
 
     void HandleOverflowBucket(Bucket * bucket); // handle the overflow
 

@@ -60,18 +60,17 @@ int ExtendibleHash<K, V>::GetNumBuckets() const {
 template <typename K, typename V>
 bool ExtendibleHash<K, V>::Find(const K &key, V &value) {
 
-    mutex.lock();
+    std::lock_guard<std::mutex> lock(mutex);
+
     const size_t bucket_id = HashKey(key);
     const Bucket * bucket = directory[bucket_id];
     const std::list<Element> & elements = bucket->elements;
     for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
         if (iterator -> key == key) {
             value = iterator -> value;
-            mutex.unlock();
             return true;
         }
     }
-    mutex.unlock();
     return false;
 }
 
@@ -81,18 +80,18 @@ bool ExtendibleHash<K, V>::Find(const K &key, V &value) {
  */
 template <typename K, typename V>
 bool ExtendibleHash<K, V>::Remove(const K &key) {
-    mutex.lock();
+
+    std::lock_guard<std::mutex> lock(mutex);
+
     const size_t bucket_id = HashKey(key);
     Bucket * bucket = directory[bucket_id];
     std::list<ExtendibleHash::Element> & elements = bucket->elements;
     for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
         if (iterator -> key == key) {
             elements.erase(iterator);
-            mutex.unlock();
             return true;
         }
     }
-    mutex.unlock();
     return false;
 }
 
@@ -157,8 +156,8 @@ void ExtendibleHash<K, V>::HandleOverflowBucket(cmudb::ExtendibleHash<K, V>::Buc
  */
 template <typename K, typename V>
 void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {
-    mutex.lock();
 
+    std::lock_guard<std::mutex> lock(mutex);
 
     const size_t bucket_id = HashKey(key);
     Bucket * bucket = directory[bucket_id];
@@ -168,7 +167,6 @@ void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {
     for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
         if (iterator -> key == key) {
             iterator->value = value;
-            mutex.unlock();
             return;
         }
     }
@@ -178,9 +176,6 @@ void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {
 
     // handle the overflow of buckets
     HandleOverflowBucket(bucket);
-
-    mutex.unlock();
-
 
 
 }
