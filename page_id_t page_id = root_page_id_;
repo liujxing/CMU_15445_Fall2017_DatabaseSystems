@@ -1,0 +1,15 @@
+page_id_t page_id = root_page_id_;
+    while (true) {
+        Page *page = buffer_pool_manager_->FetchPage(page_id);
+        auto bPlusTreePage = reinterpret_cast<BPlusTreePage *>(page->GetData());
+        if (bPlusTreePage->IsLeafPage()) {
+            auto bPlusTreeLeafPage =
+                    reinterpret_cast<BPlusTreeLeafPage<KeyType, ValueType, KeyComparator> *>(page->GetData());
+            return bPlusTreeLeafPage;
+        } else {
+            auto bPlusTreeInternalPage =
+                    reinterpret_cast<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator> *>(page->GetData());
+            page_id = bPlusTreeInternalPage->Lookup(key, comparator_);
+        }
+    }
+    
