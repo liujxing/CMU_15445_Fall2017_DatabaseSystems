@@ -8,6 +8,7 @@
 #include "common/rid.h"
 #include "page/b_plus_tree_leaf_page.h"
 #include "page/b_plus_tree_internal_page.h"
+#include "common/logger.h"
 
 namespace cmudb {
 
@@ -26,8 +27,12 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(page_id_t page_id, page_id_t parent_id) {
     SetParentPageId(parent_id);
     SetPageType(IndexPageType::LEAF_PAGE);
     SetSize(0);
-    SetMaxSize((PAGE_SIZE - sizeof(BPlusTreeLeafPage)) / (sizeof(KeyType) + sizeof(ValueType)));
+    SetMaxSize((PAGE_SIZE - sizeof(BPlusTreeLeafPage)) / (sizeof(KeyType) + sizeof(ValueType)) - 1);
     SetNextPageId(INVALID_PAGE_ID);
+    /*
+    LOG_DEBUG("PAGE_SIZE:%d, sizeof(BPlusTreeLeafPage):%d, sizeof(KeyType):%d, sizeof(ValueType):%d",
+    PAGE_SIZE, int(sizeof(BPlusTreeLeafPage)), int(sizeof(KeyType)), int(sizeof(ValueType)));
+     */
 }
 
 /**
@@ -90,21 +95,21 @@ INDEX_TEMPLATE_ARGUMENTS
 int B_PLUS_TREE_LEAF_PAGE_TYPE::Insert(const KeyType &key,
                                        const ValueType &value,
                                        const KeyComparator &comparator) {
-    // It is guaranteed that the current leaf page is not full, so there is always space to insert.
-    assert(GetSize() < GetMaxSize());
+    // After insertion, the size can be temporarily larger than the max size
+    // TODO: rewrite using memmove and binary search
+
     // find the place of the first index >= key
     const int insert_index = this->KeyIndex(key, comparator);
     if (insert_index == -1) {
         this->array[GetSize()] = std::make_pair(key, value);
-        SetSize(GetSize()+1);
+        IncreaseSize(1);
         return GetSize();
     }
-
     for (int i = GetSize()-1; i >= insert_index; i--) {
         this->array[i+1] = this->array[i];
     }
     this->array[insert_index] = std::make_pair(key, value);
-    SetSize(GetSize()+1);
+    IncreaseSize(1);
     return GetSize();
 }
 
@@ -126,24 +131,29 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveHalfTo(
     assert(recipient->GetSize() == 0);
 
     // move the elements
+    // TODO: the start_index might be off by 1
     const int start_index = GetMaxSize()/2 + 1;
-    int recipient_index = 0;
-    for (int i = start_index; i < GetSize(); i++) {
-        recipient->array[recipient_index] = array[i];
-        recipient_index++;
-    }
+    recipient->CopyHalfFrom(&array[start_index], GetSize() - start_index);
     SetSize(start_index);
-    recipient->SetSize(recipient_index);
     assert(GetSize() + recipient->GetSize() == GetMaxSize() + 1);
 
     // set the next page pointer
+    // TODO: not sure whether need to set the next pointer
     recipient->SetNextPageId(GetNextPageId());
     SetNextPageId(recipient->GetPageId());
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyHalfFrom(MappingType *items, int size) {
-    //TODO
+    // MappingType* is the starting position of an MappingType array, size is the number of items to copy
+
+    // Only works if current leaf page is empty
+    assert(GetSize() == 0);
+
+    for (int i = 0; i < size; i++) {
+        array[i] = items[i];
+    }
+    IncreaseSize(size);
 }
 
 /*****************************************************************************
@@ -185,7 +195,7 @@ int B_PLUS_TREE_LEAF_PAGE_TYPE::RemoveAndDeleteRecord(
             for (int j = i; j < GetSize() - 1; j++) {
                 array[j] = array[j+1];
             }
-            SetSize(GetSize()-1);
+            IncreaseSize(-1);
             return GetSize();
         }
     }
@@ -208,18 +218,20 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveAllTo(BPlusTreeLeafPage *recipient,
     // It is guaranteed the current page and recipient page elements can fit in a single page.
 
     // move item from current node to recipient node
-    for (int i = 0; i < GetSize(); i++) {
-        recipient->array[recipient->GetSize()+i] = array[i];
-    }
+    recipient->CopyAllFrom(array, GetSize());
     // set size of nodes
-    recipient->IncreaseSize(GetSize());
     SetSize(0);
 
     // set next_page_id
     recipient->SetNextPageId(GetNextPageId());
 }
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyAllFrom(MappingType *items, int size) {}
+void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyAllFrom(MappingType *items, int size) {
+    for (int i = 0; i < size; i++) {
+        array[GetSize()+i] = items[i];
+    }
+    IncreaseSize(size);
+}
 
 /*****************************************************************************
  * REDISTRIBUTE
@@ -237,15 +249,14 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveFirstToEndOf(
     // It is guaranteed the recipient is the child 0 of parent.
 
     // move element
-    recipient->array[recipient->GetSize()] = array[0];
-    recipient->SetSize(recipient->GetSize()+1);
+    recipient->CopyLastFrom(array[0]);
     for (int i = 0; i < GetSize()-1; i++)
         array[i] = array[i+1];
-    SetSize(GetSize()-1);
+    IncreaseSize(-1);
 
     // change the parent pointer
     const int node_parent_index = 1;
-    Page* parent_page = buffer_pool_manager->FetchPage(GetPageId());
+    Page* parent_page = buffer_pool_manager->FetchPage(GetParentPageId());
     auto parent_page_data = reinterpret_cast<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>*>(parent_page->GetData());
     assert(parent_page_data->ValueAt(0) == recipient->GetPageId());
     assert(parent_page_data->ValueAt(1) == GetPageId());
@@ -257,6 +268,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveFirstToEndOf(
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyLastFrom(const MappingType &item) {
     array[GetSize()] = item;
+    IncreaseSize(1);
 }
 /*
  * Remove the last key & value pair from this page to "recipient" page, then
@@ -271,25 +283,36 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveLastToFrontOf(
     assert(GetNextPageId() == recipient->GetPageId());
 
     // move the element
-    for (int i = recipient->GetSize()-1; i >= 0; i--) {
-        recipient->array[i+1] = recipient->array[i];
-    }
-    recipient->array[0] = array[GetSize()-1];
-    recipient->IncreaseSize(1);
-    this->IncreaseSize(-1);
+    recipient->CopyFirstFrom(GetItem(GetSize()-1), parentIndex+1, buffer_pool_manager);
+    IncreaseSize(-1);
 
-    // change the parent pointer
-    const int recipient_parent_index = parentIndex + 1;
-    Page* parent_page = buffer_pool_manager->FetchPage(GetParentPageId());
-    auto parent_page_data = reinterpret_cast<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>*>(parent_page->GetData());
-    parent_page_data->SetKeyAt(recipient_parent_index, recipient->KeyAt(0));
-    buffer_pool_manager->UnpinPage(parent_page->GetPageId(), true);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyFirstFrom(
     const MappingType &item, int parentIndex,
-    BufferPoolManager *buffer_pool_manager) {}
+    BufferPoolManager *buffer_pool_manager) {
+
+    // move the element
+    for (int i = GetSize()-1; i >= 0; i--) {
+        array[i+1] = array[i];
+    }
+    // insert the first element
+    array[0] = item;
+    IncreaseSize(1);
+
+    // change the pointer in the parent
+    Page* parent_page = buffer_pool_manager->FetchPage(GetPageId());
+    auto parent_page_data = reinterpret_cast<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>*>(parent_page->GetData());
+    parent_page_data->SetKeyAt(parentIndex, array[0].first);
+    buffer_pool_manager->UnpinPage(parent_page->GetPageId(), true);
+
+
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::RedirectParentIdOfChildPages(BPlusTreeLeafPage* neighbor,
+                                                              BufferPoolManager* buffer_pool_manager) {}
 
 /*****************************************************************************
  * DEBUG
@@ -301,7 +324,7 @@ std::string B_PLUS_TREE_LEAF_PAGE_TYPE::ToString(bool verbose) const {
   }
   std::ostringstream stream;
   if (verbose) {
-    stream << "[pageId: " << GetPageId() << " parentId: " << GetParentPageId()
+    stream << "[pageId:" << GetPageId() << ",parentId:" << GetParentPageId() << ",nextId:" << GetNextPageId()
            << "]<" << GetSize() << "> ";
   }
   int entry = 0;
@@ -315,9 +338,11 @@ std::string B_PLUS_TREE_LEAF_PAGE_TYPE::ToString(bool verbose) const {
       stream << " ";
     }
     stream << std::dec << array[entry].first;
+    /*
     if (verbose) {
       stream << "(" << array[entry].second << ")";
     }
+     */
     ++entry;
   }
   return stream.str();

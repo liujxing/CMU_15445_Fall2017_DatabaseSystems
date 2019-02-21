@@ -53,7 +53,10 @@ public:
   void MoveLastToFrontOf(BPlusTreeInternalPage *recipient,
                          int parent_index,
                          BufferPoolManager *buffer_pool_manager);
-  // DEUBG and PRINT
+
+  void RedirectParentIdOfChildPages(BPlusTreeInternalPage* neighbor,
+                                    BufferPoolManager* buffer_pool_manager);
+  // DEBUG and PRINT
   std::string ToString(bool verbose) const;
   void QueueUpChildren(std::queue<BPlusTreePage *> *queue,
                        BufferPoolManager *buffer_pool_manager);

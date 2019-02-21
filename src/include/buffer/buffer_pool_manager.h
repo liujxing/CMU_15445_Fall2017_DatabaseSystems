@@ -34,6 +34,18 @@ public:
 
   bool DeletePage(page_id_t page_id);
 
+  std::string StatusString() const {
+      std::ostringstream stream;
+      stream << "free:" << free_list_->size() << ", cache:" << replacer_->Size() << "\n";
+      return stream.str();
+  }
+
+  int GetPinCount(page_id_t page_id) {
+      Page* page;
+      page_table_->Find(page_id, page);
+      return page->GetPinCount();
+  }
+
 private:
     size_t pool_size_; // number of pages in buffer pool
     Page *pages_;      // array of pages

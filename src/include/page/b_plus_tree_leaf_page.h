@@ -58,7 +58,10 @@ public:
                         BufferPoolManager *buffer_pool_manager);
   void MoveLastToFrontOf(BPlusTreeLeafPage *recipient, int parentIndex,
                          BufferPoolManager *buffer_pool_manager);
-  // Debug
+
+  void RedirectParentIdOfChildPages(BPlusTreeLeafPage* neighbor, BufferPoolManager* buffer_pool_manager);
+
+    // Debug
   std::string ToString(bool verbose = false) const;
 
 private:

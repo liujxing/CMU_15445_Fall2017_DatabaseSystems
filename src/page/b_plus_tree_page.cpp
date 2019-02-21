@@ -53,7 +53,7 @@ int BPlusTreePage::GetMinSize() const {
     }
 
     // TODO: the correct answer should be (max_size_+1)/2 instead of max_size/2
-    return (max_size_+1)/2;
+    return (GetMaxSize()+1)/2;
 }
 
 /*
