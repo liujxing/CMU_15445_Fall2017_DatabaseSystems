@@ -163,7 +163,7 @@ void ExtendibleHash<K, V>::Insert(const K &key, const V &value) {
     Bucket * bucket = directory[bucket_id];
     std::list<Element> & elements = bucket->elements;
 
-    // check if the key exists in the hashtable
+    // check if the key exists in the hash table
     for (auto iterator = elements.begin(); iterator != elements.end(); iterator++) {
         if (iterator -> key == key) {
             iterator->value = value;
