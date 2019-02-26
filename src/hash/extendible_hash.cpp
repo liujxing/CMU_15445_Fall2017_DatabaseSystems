@@ -3,6 +3,9 @@
 #include "hash/extendible_hash.h"
 #include "page/page.h"
 
+#include "common/rid.h"
+#include "concurrency/lock_manager.h"
+
 namespace cmudb {
 
 /*
@@ -186,4 +189,6 @@ template class ExtendibleHash<Page *, std::list<Page *>::iterator>;
 template class ExtendibleHash<int, std::string>;
 template class ExtendibleHash<int, std::list<int>::iterator>;
 template class ExtendibleHash<int, int>;
+// custom classes
+template class ExtendibleHash<RID, std::shared_ptr<LockQueue>>;
 } // namespace cmudb

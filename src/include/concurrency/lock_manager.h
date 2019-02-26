@@ -19,58 +19,60 @@
 
 namespace cmudb {
 
+enum class LockType {
+    X, S
+};
+
+
+struct LockRequest {
+
+    const RID rid_;
+    bool granted_ = false;
+    const LockType lock_type_;
+    const txn_id_t transaction_id_;
+    const int timestamp_;
+
+    // constructors
+    LockRequest(const RID& rid, const bool granted,
+                const LockType& lock_type, const txn_id_t transaction_id, const int timestamp):
+            rid_(rid),
+            granted_(granted),
+            lock_type_(lock_type),
+            transaction_id_(transaction_id),
+            timestamp_(timestamp)
+    {};
+
+    LockRequest(const RID& rid, const LockType& lock_type, const txn_id_t transaction_id, const int timestamp):
+            rid_(rid),
+            granted_(false),
+            lock_type_(lock_type),
+            transaction_id_(transaction_id),
+            timestamp_(timestamp)
+    {};
+
+    LockRequest(const LockRequest&) = default;
+
+    // destructor
+    ~LockRequest() = default;
+
+    // compatibility function with another lock
+    bool IsCompatible(const LockRequest& other) const {
+        // TODO: add assertion check on whether this is a duplicate request
+        if (!(rid_ == other.rid_)) return true;
+        if (transaction_id_ == other.transaction_id_) return true;
+        if (lock_type_ == LockType::S && other.lock_type_ == LockType::S) return true;
+        return false;
+    }
+};
+
+struct LockQueue {
+    std::condition_variable condition_variable_;
+    std::deque<LockRequest> queue_;
+};
+
 class LockManager {
 
-    enum class LockType {
-        X, S
-    };
 
-
-    struct LockRequest {
-
-        const RID rid_;
-        bool granted_ = false;
-        const LockType lock_type_;
-        const txn_id_t transaction_id_;
-        const int timestamp_;
-
-        // constructors
-        LockRequest(const RID& rid, const bool granted,
-                    const LockType& lock_type, const txn_id_t transaction_id, const int timestamp):
-                rid_(rid),
-                granted_(granted),
-                lock_type_(lock_type),
-                transaction_id_(transaction_id),
-                timestamp_(timestamp)
-        {};
-
-        LockRequest(const RID& rid, const LockType& lock_type, const txn_id_t transaction_id, const int timestamp):
-                rid_(rid),
-                granted_(false),
-                lock_type_(lock_type),
-                transaction_id_(transaction_id),
-                timestamp_(timestamp)
-        {};
-
-        LockRequest(const LockRequest&) = default;
-
-        // destructor
-        ~LockRequest() = default;
-
-        // compatibility function with another lock
-        bool IsCompatible(const LockRequest& other) const {
-            // TODO: add assertion check on whether this is a duplicate request
-            if (!(rid_ == other.rid_)) return true;
-            if (transaction_id_ == other.transaction_id_) return true;
-            if (lock_type_ == LockType::S && other.lock_type_ == LockType::S) return true;
-            return false;
-        }
-    };
-
-    struct LockQueue {
-        std::condition_variable condition_variable_;
-        std::deque<LockRequest> queue_;
-    };
 
 
 
