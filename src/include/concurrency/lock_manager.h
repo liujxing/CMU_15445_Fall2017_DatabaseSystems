@@ -72,12 +72,8 @@ struct LockQueue {
 
 class LockManager {
 
-
-
-
-
 public:
-    LockManager(bool strict_2PL) : strict_2PL_(strict_2PL){};
+    LockManager(bool strict_2PL);
 
     /*** below are APIs need to implement ***/
     // lock:
@@ -100,13 +96,13 @@ private:
 
     /** transaction timestamp related variables **/
     int current_timestamp_ = 0;
-    ExtendibleHash<txn_id_t, int> txn_timestamp_table_{BUCKET_SIZE};
+    HashTable<txn_id_t, int>* txn_timestamp_table_;
     // assign/get timestamp to transaction, return the timestamp
     int AssignTransactionTimestamp(const Transaction* transaction);
     int AssignTransactionTimestamp(const txn_id_t txn_id);
 
     /** lock request related variables **/
-    ExtendibleHash<RID, std::shared_ptr<LockQueue>> rid_lock_table_{BUCKET_SIZE};
+    ExtendibleHash<RID, std::shared_ptr<LockQueue>>* rid_lock_table_;
     // abort current transaction
     inline bool AbortTransaction(Transaction* transaction) {
         //TODO: when to remove transaction from current timestamp table
