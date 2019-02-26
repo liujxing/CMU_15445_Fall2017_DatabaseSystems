@@ -6,6 +6,12 @@
 
 namespace cmudb {
 
+LockManager::LockManager(bool strict_2PL):strict_2PL_(strict_2PL) {
+    txn_timestamp_table_ = new ExtendibleHash<txn_id_t, int>(BUCKET_SIZE);
+    rid_lock_table_ = new ExtendibleHash<RID, std::shared_ptr<LockQueue>> (BUCKET_SIZE);
+}
+
+
 bool LockManager::LockShared(Transaction *txn, const RID &rid) {
 
     // obtain mutex of LockManager
@@ -78,11 +84,11 @@ bool LockManager::Unlock(Transaction *txn, const RID &rid) {
 
 int LockManager::AssignTransactionTimestamp(const cmudb::txn_id_t txn_id) {
     int timestamp;
-    if (txn_timestamp_table_.Find(txn_id, timestamp)) return timestamp;
+    if (txn_timestamp_table_->Find(txn_id, timestamp)) return timestamp;
     else {
         timestamp = current_timestamp_;
         current_timestamp_++;
-        txn_timestamp_table_.Insert(txn_id, timestamp);
+        txn_timestamp_table_->Insert(txn_id, timestamp);
         return timestamp;
     }
 }
@@ -97,7 +103,7 @@ bool LockManager::CheckLockRequestCompatibility(const LockRequest &request) {
     const RID& rid = request.rid_;
     std::shared_ptr<LockQueue> lock_queue;
 
-    if (!rid_lock_table_.Find(rid, lock_queue)) {
+    if (!rid_lock_table_->Find(rid, lock_queue)) {
         return true;
     }
 
@@ -111,8 +117,8 @@ void LockManager::AddLockRequestToQueue(const LockRequest &request) {
     const RID& rid = request.rid_;
     std::shared_ptr<LockQueue> lock_queue;
 
-    if (!rid_lock_table_.Find(rid, lock_queue)) {
-        rid_lock_table_.Insert(rid, lock_queue);
+    if (!rid_lock_table_->Find(rid, lock_queue)) {
+        rid_lock_table_->Insert(rid, lock_queue);
     }
     lock_queue->queue_.emplace_back(request);
 }
@@ -142,7 +148,7 @@ bool LockManager::WaitForLockRequest(LockRequest &request, std::unique_lock<std:
 bool LockManager::CheckDeadlockPolicy(LockRequest& request) {
     const RID& rid = request.rid_;
     std::shared_ptr<LockQueue> lock_queue;
-    if (!rid_lock_table_.Find(rid, lock_queue)) return true;
+    if (!rid_lock_table_->Find(rid, lock_queue)) return true;
     for (auto iter = lock_queue->queue_.rbegin(); iter != lock_queue->queue_.rend(); iter++) {
         if (request.timestamp_ > iter->timestamp_) return false;
     }
