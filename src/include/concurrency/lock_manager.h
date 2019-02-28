@@ -28,46 +28,85 @@ struct LockRequest {
 
     const RID rid_;
     bool granted_ = false;
-    const LockType lock_type_;
-    const txn_id_t transaction_id_;
+    LockType lock_type_;
+    Transaction* txn_;
     const int timestamp_;
 
-    // constructors
-    LockRequest(const RID& rid, const bool granted,
-                const LockType& lock_type, const txn_id_t transaction_id, const int timestamp):
+    // constructors and destructors
+    LockRequest(const RID& rid, const LockType& lock_type,
+                Transaction* txn, const int timestamp, const bool granted = false):
             rid_(rid),
             granted_(granted),
             lock_type_(lock_type),
-            transaction_id_(transaction_id),
-            timestamp_(timestamp)
-    {};
-
-    LockRequest(const RID& rid, const LockType& lock_type, const txn_id_t transaction_id, const int timestamp):
-            rid_(rid),
-            granted_(false),
-            lock_type_(lock_type),
-            transaction_id_(transaction_id),
+            txn_(txn),
             timestamp_(timestamp)
     {};
 
     LockRequest(const LockRequest&) = default;
+    LockRequest(LockRequest&&) = default;
+    LockRequest& operator=(const LockRequest&) = default;
+    LockRequest& operator=(LockRequest&&) = default;
 
-    // destructor
     ~LockRequest() = default;
+
+    // comparison operators
+    bool operator==(const LockRequest& other) const {
+        return rid_ == other.rid_ &&
+               lock_type_ == other.lock_type_ &&
+               txn_ == other.txn_;
+    }
+
+    bool operator!=(const LockRequest& other) const {
+        return !(*this == other);
+    }
 
     // compatibility function with another lock
     bool IsCompatible(const LockRequest& other) const {
-        // TODO: add assertion check on whether this is a duplicate request
-        if (!(rid_ == other.rid_)) return true;
-        if (transaction_id_ == other.transaction_id_) return true;
-        if (lock_type_ == LockType::S && other.lock_type_ == LockType::S) return true;
+        assert(*this != other);
+
+        if (!(rid_ == other.rid_)) return true; // request on different tuple
+        if (txn_ == other.txn_) return true; // request from the same transaction
+        if (lock_type_ == LockType::S && other.lock_type_ == LockType::S) return true; // two transactions requesting S on the same tuple
         return false;
     }
+
+
+
 };
 
 struct LockQueue {
+
     std::condition_variable condition_variable_;
-    std::deque<LockRequest> queue_;
+    std::deque<std::shared_ptr<LockRequest>> queue_;
+
+    // constructors
+    LockQueue() = default;
+    ~LockQueue() = default;
+
+
+    // Check if this request is compatible with all request within the queue up to this request
+    bool IsCompatible(const std::shared_ptr<LockRequest>& request) const {
+
+        for (auto iterator = queue_.begin(); iterator != queue_.end(); iterator++) {
+            if (*iterator == request) return true;
+            if (!request->IsCompatible(*(iterator->get()))) return false;
+        }
+        return true;
+    }
+
+    // Fetch a lock request from transaction
+    std::shared_ptr<LockRequest> FetchLockRequest(const Transaction* txn) {
+        std::shared_ptr<LockRequest> request = nullptr;
+        for (auto iterator = queue_.begin(); iterator != queue_.end(); iterator++) {
+            if (iterator->get()->txn_ == txn) {
+                request = *iterator;
+                break;
+            }
+        }
+        assert(request != nullptr);
+        return request;
+
+    }
 };
 
 class LockManager {
@@ -110,31 +149,51 @@ private:
         return false;
     }
     // check if current LockRequest is compatible with existing
-    bool CheckLockRequestCompatibility(const LockRequest& request);
+    bool CheckLockRequestCompatibility(const std::shared_ptr<LockRequest>& request);
 
 
     // grant a lock
-    void GrantLock(LockRequest& request, Transaction* txn);
+    void GrantLock(std::shared_ptr<LockRequest>& request);
 
     // add lock request to queue
-    void AddLockRequestToQueue(const LockRequest& request);
+    void AddLockRequestToQueue(const std::shared_ptr<LockRequest>& request);
 
     // check whether this lock request satisfies deadlock prevention rule
-    bool CheckDeadlockPolicy(LockRequest& request);
+    bool CheckDeadlockPolicy(std::shared_ptr<LockRequest>& request);
 
     // wait for current lock to be granted or aborted
-    bool WaitForLockRequest(LockRequest& request, std::unique_lock<std::mutex>& lock_manager);
+    bool WaitForLockRequest(std::shared_ptr<LockRequest>& request,
+                            std::unique_lock<std::mutex>& lock_manager);
 
     // check if lock request is compatibility with (strict) 2PL protocol
-    bool CheckLockRequestLegalityUnder2PL(Transaction* txn) const;
-    bool CheckUpgradeRequestLegalityUnder2PL(Transaction* txn) const;
+    bool CheckLockRequestLegalityUnder2PL(std::shared_ptr<LockRequest>& lock_request) const;
+    bool CheckUpgradeRequestLegalityUnder2PL(std::shared_ptr<LockRequest>& lock_request) const;
 
     // check legality of unlock request under (strict) 2PL protocol
-    bool CheckUnlockReqestLegalityUnder2PL(const LockRequest& lock_request, Transaction* txn) const;
+    bool CheckUnlockRequestLegalityUnder2PL(const std::shared_ptr<LockRequest>& lock_request) const;
+
+    void UpdateFollowingLockRequests(std::shared_ptr<LockQueue> & lock_queue,
+                                     std::shared_ptr<LockRequest> & request);
+
+    std::shared_ptr<LockQueue> FetchLockQueue(const RID& rid);
+
+    bool CheckLockUpgradeCompatibility(const std::shared_ptr<LockRequest>& request);
+
+    void GrantLockUpgrade(std::shared_ptr<LockRequest> & request);
+
+    bool CheckDeadlockPolicyForUpgrade(std::shared_ptr<LockRequest>& request);
+
+    bool WaitForLockUpgrade(std::shared_ptr<LockRequest>& lock_request,
+                            std::unique_lock<std::mutex>& manager_lock);
+
+    bool UnlockRequest(std::shared_ptr<LockRequest>& request);
 
 
 
 
-};
+
+
+
+    };
 
 } // namespace cmudb
