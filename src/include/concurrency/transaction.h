@@ -101,6 +101,15 @@ public:
 
   inline void SetPrevLSN(lsn_t prev_lsn) { prev_lsn_ = prev_lsn; }
 
+  std::string GetStatus() {
+    std::stringstream ss;
+    ss << "stored pages:";
+    for (Page* page : *page_set_) {
+      ss << page->GetPageId() << " ";
+    }
+    return ss.str();
+  }
+
 private:
   TransactionState state_;
   // thread id, single-threaded transactions

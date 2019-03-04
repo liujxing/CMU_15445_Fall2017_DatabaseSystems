@@ -152,34 +152,40 @@ INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveHalfTo(
     BPlusTreeInternalPage *recipient,
     BufferPoolManager *buffer_pool_manager) {
-    //TODO: buffer_pool_manager is not used in here, perhaps to be used to set the parent_page_id of all child nodes
 
     // It is guaranteed that current size of node is equal to MaxSize + 1
-
     assert(GetSize() == GetMaxSize() + 1);
 
     // It is guaranteed the recipient is an empty page
     assert(recipient->GetSize() == 0);
 
     // move elements
-    // TODO: the start index might have problem
+    // TODO: the start index might not be textbook value
     const int start_index = (GetSize()+1)/2;
     recipient->CopyHalfFrom(&array[start_index], GetSize()-start_index, buffer_pool_manager);
     SetSize(start_index);
     assert(GetSize() + recipient->GetSize() == GetMaxSize() + 1);
 
-    // TODO: not sure whether need to deal with parent, since parent is not dealt with in leaf_page
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyHalfFrom(
     MappingType *items, int size, BufferPoolManager *buffer_pool_manager) {
-    // TODO: not sure why buffer_pool_manager is needed here
     // Only works if current internal page is empty
     assert(GetSize() == 0);
 
     for (int i = 0; i < size; i++) {
+        // copy the element
         array[i] = items[i];
+
+        // redirect the parent page ID of copied pages
+        // TODO: not sure whether need to lock the child pages
+        Page* child_page = buffer_pool_manager->FetchPage(array[i].second);
+        child_page->WLatch();
+        auto child_page_data = reinterpret_cast<BPlusTreePage*>(child_page->GetData());
+        child_page_data->SetParentPageId(GetPageId());
+        child_page->WUnlatch();
+        buffer_pool_manager->UnpinPage(child_page->GetPageId(), true);
     }
     IncreaseSize(size);
 }

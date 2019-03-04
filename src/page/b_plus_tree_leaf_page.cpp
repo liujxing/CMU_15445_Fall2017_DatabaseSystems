@@ -131,14 +131,13 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveHalfTo(
     assert(recipient->GetSize() == 0);
 
     // move the elements
-    // TODO: the start_index might be off by 1
+    // TODO: the start index might not be textbook value
     const int start_index = GetMaxSize()/2 + 1;
     recipient->CopyHalfFrom(&array[start_index], GetSize() - start_index);
     SetSize(start_index);
     assert(GetSize() + recipient->GetSize() == GetMaxSize() + 1);
 
     // set the next page pointer
-    // TODO: not sure whether need to set the next pointer
     recipient->SetNextPageId(GetNextPageId());
     SetNextPageId(recipient->GetPageId());
 }

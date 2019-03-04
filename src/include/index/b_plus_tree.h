@@ -20,6 +20,12 @@
 
 namespace cmudb {
 
+
+// operation mode of B-Plus tree
+enum class Mode {
+    LOOKUP, INSERT, DELETE
+};
+
 #define BPLUSTREE_TYPE BPlusTree<KeyType, ValueType, KeyComparator>
 // Main class providing the API for the Interactive B+ Tree.
 INDEX_TEMPLATE_ARGUMENTS
@@ -60,10 +66,12 @@ public:
                       Transaction *transaction = nullptr);
   // expose for test purpose
   B_PLUS_TREE_LEAF_PAGE_TYPE *FindLeafPage(const KeyType &key,
+                                           Transaction* txn,
+                                           Mode mode,
                                            bool leftMost = false);
 
 private:
-  void StartNewTree(const KeyType &key, const ValueType &value);
+  void StartNewTree(const KeyType &key, const ValueType &value, Transaction* transaction);
 
   bool InsertIntoLeaf(const KeyType &key, const ValueType &value,
                       Transaction *transaction = nullptr);
@@ -72,7 +80,7 @@ private:
                         BPlusTreePage *new_node,
                         Transaction *transaction = nullptr);
 
-  template <typename N> N *Split(N *node);
+  template <typename N> N *Split(N *node, Transaction* transaction);
 
   template <typename N>
   bool CoalesceOrRedistribute(N *& node, Transaction *transaction = nullptr);
@@ -94,6 +102,30 @@ private:
   page_id_t root_page_id_;
   BufferPoolManager *buffer_pool_manager_;
   KeyComparator comparator_;
+
+  std::mutex root_mutex_; // mutex used to protect the root node
+  bool root_locked_; // boolean to indicate whether the root node is locked
+
+  // helper methods
+  // lock current root id
+  void LockRoot();
+  // unlock root
+  void UnlockRoot();
+
+
+  // lock a page according to mode, and add to the set of transactions
+  void LockPage(Page* page, Transaction* txn, Mode mode);
+  // check whether it is safe to release lock on a page when walking down the B-Plus tree
+  template <typename N> bool IsSafeToRelease(const N* page, const Mode mode) const;
+  // unlock a single page held by a transaction, remove it from transaction, and unpin the page
+  void UnlockUnpinSinglePage(Page* page, Transaction* txn, const Mode mode, const bool is_dirty = false);
+  // unlock all pages held by a transaction, remove them from transaction, and unpin the pages
+  void UnlockUnpinAllPagesInTransaction(Transaction *txn, const Mode mode);
+  // unlock all pages held by transaction except for the input page, remove them from transaction, and unpin the pages
+  void UnlockUnpinPageExcept(Page *page, Transaction *txn, const Mode mode);
+  // unlock the last page store in ransaction
+  void UnlockUnpinLastPageInTransaction(Transaction* txn, const Mode mode);
+
 };
 
 } // namespace cmudb

@@ -54,6 +54,8 @@ TEST(BPlusTreeTests, InsertTest1) {
     EXPECT_EQ(rids[0].GetSlotNum(), value);
   }
 
+  std::cout << "aaaaa\n";
+
   int64_t start_key = 1;
   int64_t current_key = start_key;
   index_key.SetFromInteger(start_key);
@@ -66,6 +68,8 @@ TEST(BPlusTreeTests, InsertTest1) {
   }
 
   EXPECT_EQ(current_key, keys.size() + 1);
+
+  std::cout << "bbbbb\n";
 
   bpm->UnpinPage(HEADER_PAGE_ID, true);
   delete transaction;
