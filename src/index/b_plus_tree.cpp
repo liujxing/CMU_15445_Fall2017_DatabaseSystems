@@ -44,16 +44,21 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key,
     result.clear();
 
     // fetch the right leaf page
-    std::cout << "before FindLeafPage" << "\n";
+    LockRoot();
     B_PLUS_TREE_LEAF_PAGE_TYPE* leaf_page = FindLeafPage(key, transaction, Mode::LOOKUP, false);
     if (leaf_page == nullptr) return false;
 
     // check if key exists in the leaf page
     ValueType value;
-    std::cout << "before Lookup\n";
     const bool find_key = leaf_page->Lookup(key, value, comparator_);
     if (find_key) result.emplace_back(value);
-    UnlockUnpinAllPagesInTransaction(transaction, Mode::LOOKUP);
+
+    // unlatch and unpin the leaf page
+    Page* page = buffer_pool_manager_->FetchPage(leaf_page->GetPageId());
+    page->RUnlatch();
+    buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
+    buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
+
     return find_key;
 }
 
@@ -128,6 +133,7 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value,
     // find the leaf page potentially containing the insertion target
     // the page data and ancestral unsafe pages are locked in transaction
     B_PLUS_TREE_LEAF_PAGE_TYPE* page_data = FindLeafPage(key, transaction, Mode::INSERT, false);
+    std::cout << "tree before insert " << key << " on page " << page_data->GetPageId() << ":" << ToString(false);
 
     // check if the data is within the leaf page
     ValueType value_temp;
@@ -486,11 +492,10 @@ B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
                                                          Transaction* txn,
                                                          Mode mode,
                                                          bool leftMost) {
-    std::cout << "Transaction is null:" << (txn == nullptr) << "\n";
+    // note here the transaction can be null when LOOKUP
+    assert(txn != nullptr || mode == Mode::LOOKUP);
 
-    // lock the root_mutex_ first
-    if (mode == Mode::LOOKUP)
-        LockRoot();
+    // here we assume the root is locked from outside
 
     // Check if tree is empty;
     if (IsEmpty()) {
@@ -505,19 +510,13 @@ B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
 
     while (true) {
         auto bPlusTreePage = reinterpret_cast<BPlusTreePage*>(page->GetData());
-        std::cout << "pageId:" << bPlusTreePage->GetPageId() << "\n";
         // if page is leaf page, return the page as leaf page
         if (bPlusTreePage->IsLeafPage()) {
             auto bPlusTreeLeafPage = reinterpret_cast<B_PLUS_TREE_LEAF_PAGE_TYPE*>(page->GetData());
-            if (IsSafeToRelease<B_PLUS_TREE_LEAF_PAGE_TYPE>(bPlusTreeLeafPage, mode)) {
-                UnlockUnpinPageExcept(page, txn, mode);
-            }
             return bPlusTreeLeafPage;
         } else { // if page is internal page
             auto bPlusTreeInternalPage = reinterpret_cast<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>*>(page->GetData());
-            if (IsSafeToRelease<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>>(bPlusTreeInternalPage, mode)) {
-                UnlockUnpinPageExcept(page, txn, mode);
-            }
+            std::cout << "key:" << key << ", page: " << page->GetPageId() << "\n";
             // fetch and lock desired child page
             page_id_t child_page_id;
             if (leftMost) {
@@ -526,7 +525,24 @@ B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
                 child_page_id = bPlusTreeInternalPage->Lookup(key, comparator_);
             }
             Page* child_page = buffer_pool_manager_->FetchPage(child_page_id);
-            LockPage(child_page, txn, mode);
+            if (mode == Mode::LOOKUP) child_page->RLatch();
+            else child_page->WLatch();
+            // note here the child_page hasn't been added to the transaction's page set yet
+
+            // check if it is safe to release all ancestral pages of the child page
+            if (mode == Mode::LOOKUP) {
+                page->RUnlatch();
+                buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
+                UnlockRoot();
+            } else {
+                auto child_page_data = reinterpret_cast<BPlusTreePage*>(child_page->GetData());
+                assert(child_page_data->GetParentPageId() == bPlusTreePage->GetPageId());
+                if (IsSafeToRelease(child_page_data, mode)) {
+                    UnlockUnpinAllPagesInTransaction(txn, mode);
+                }
+                // now add the new page to transaction's page set
+                txn->AddIntoPageSet(child_page);
+            }
 
             // set page to child_page
             page = child_page;
@@ -653,7 +669,7 @@ void BPLUSTREE_TYPE::LockPage(Page* page, Transaction *txn, Mode mode) {
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-template <typename N> bool BPLUSTREE_TYPE::IsSafeToRelease(const N* page, const Mode mode) const {
+bool BPLUSTREE_TYPE::IsSafeToRelease(const BPlusTreePage* page, const Mode mode) const {
     switch (mode) {
         case Mode::LOOKUP:
             return true;
@@ -668,6 +684,8 @@ INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::UnlockUnpinPageExcept(Page *page, Transaction *txn, const Mode mode) {
     // if root is locked, unlock root
     UnlockRoot();
+
+    if (txn == nullptr) return;
 
     std::shared_ptr<std::deque<Page*>> deque = txn->GetPageSet();
     assert(deque->back() == page);
@@ -693,6 +711,9 @@ void BPLUSTREE_TYPE::UnlockUnpinPageExcept(Page *page, Transaction *txn, const M
 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::UnlockUnpinAllPagesInTransaction(Transaction *txn, const Mode mode) {
+    assert(mode != Mode::LOOKUP);
+    assert(txn != nullptr);
+
     // if root is locked, unlock root
     UnlockRoot();
 
@@ -701,15 +722,9 @@ void BPLUSTREE_TYPE::UnlockUnpinAllPagesInTransaction(Transaction *txn, const Mo
     // unlock and unpin all pages in deque
     // The order of unlocking is from root to leaf, in order to avoid deadlock
     for (auto iter = deque->begin(); iter != deque->end(); iter++) {
-        if (mode == Mode::LOOKUP) {
-            (*iter)->RUnlatch();
-            buffer_pool_manager_->UnpinPage((*iter)->GetPageId(), false);
-        }else {
             (*iter) ->WUnlatch();
             buffer_pool_manager_->UnpinPage((*iter)->GetPageId(), true);
         }
-
-    }
 
     // remove the pages from deque
     deque->clear();

@@ -103,7 +103,7 @@ private:
   BufferPoolManager *buffer_pool_manager_;
   KeyComparator comparator_;
 
-  std::mutex root_mutex_; // mutex used to protect the root node
+  mutable std::mutex root_mutex_; // mutex used to protect the root node
   bool root_locked_; // boolean to indicate whether the root node is locked
 
   // helper methods
@@ -116,14 +116,14 @@ private:
   // lock a page according to mode, and add to the set of transactions
   void LockPage(Page* page, Transaction* txn, Mode mode);
   // check whether it is safe to release lock on a page when walking down the B-Plus tree
-  template <typename N> bool IsSafeToRelease(const N* page, const Mode mode) const;
+  bool IsSafeToRelease(const BPlusTreePage* page, const Mode mode) const;
   // unlock a single page held by a transaction, remove it from transaction, and unpin the page
   void UnlockUnpinSinglePage(Page* page, Transaction* txn, const Mode mode, const bool is_dirty = false);
   // unlock all pages held by a transaction, remove them from transaction, and unpin the pages
   void UnlockUnpinAllPagesInTransaction(Transaction *txn, const Mode mode);
   // unlock all pages held by transaction except for the input page, remove them from transaction, and unpin the pages
   void UnlockUnpinPageExcept(Page *page, Transaction *txn, const Mode mode);
-  // unlock the last page store in ransaction
+  // unlock the last page store in transaction
   void UnlockUnpinLastPageInTransaction(Transaction* txn, const Mode mode);
 
 };
