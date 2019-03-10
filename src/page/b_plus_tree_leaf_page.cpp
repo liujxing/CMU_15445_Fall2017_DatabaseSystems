@@ -138,7 +138,6 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveHalfTo(
     assert(GetSize() + recipient->GetSize() == GetMaxSize() + 1);
 
     // set the next page pointer
-    // TODO: not sure whether need to set the next pointer
     recipient->SetNextPageId(GetNextPageId());
     SetNextPageId(recipient->GetPageId());
 }

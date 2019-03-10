@@ -24,6 +24,10 @@ namespace cmudb {
 // Main class providing the API for the Interactive B+ Tree.
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTree {
+    enum class Mode {
+        LOOKUP, INSERT, DELETE
+    };
+
 public:
   explicit BPlusTree(const std::string &name,
                            BufferPoolManager *buffer_pool_manager,
@@ -60,6 +64,8 @@ public:
                       Transaction *transaction = nullptr);
   // expose for test purpose
   B_PLUS_TREE_LEAF_PAGE_TYPE *FindLeafPage(const KeyType &key,
+                                           Transaction* transaction,
+                                           const Mode mode,
                                            bool leftMost = false);
 
 private:
@@ -94,6 +100,19 @@ private:
   page_id_t root_page_id_;
   BufferPoolManager *buffer_pool_manager_;
   KeyComparator comparator_;
+
+  // lock the root page id
+  mutable std::mutex root_lock_;
+  bool root_locked_;
+  void LockRoot();
+  void UnlockRoot();
+
+  void LockPage(Page* page, Transaction* transaction, const Mode mode);
+
+  bool IsSafeToRelease(Page *page, const Mode mode) const;
+
+  void ReleaseAllLocksFromTransaction(Transaction* transaction, const Mode mode);
+
 };
 
 } // namespace cmudb
