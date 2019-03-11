@@ -49,7 +49,7 @@ void InsertHelper(BPlusTree<GenericKey<8>, RID, GenericComparator<8>> &tree,
   delete transaction;
 }
 
-// helper function to seperate insert
+// helper function to separate insert
 void InsertHelperSplit(
     BPlusTree<GenericKey<8>, RID, GenericComparator<8>> &tree,
     const std::vector<int64_t> &keys, int total_threads,

@@ -500,10 +500,6 @@ B_PLUS_TREE_LEAF_PAGE_TYPE *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key,
     // deal with the case when the root is leaf
     if (page_data->IsLeafPage()) {
         if (mode == Mode::LOOKUP) UnlockRoot();
-        else {
-            if (IsSafeToRelease(page, mode))
-                ReleaseAllLocksFromTransaction(transaction, mode);
-        }
     }
 
     while (!page_data->IsLeafPage()) {
