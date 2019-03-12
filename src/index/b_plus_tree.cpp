@@ -249,7 +249,7 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node,
  *****************************************************************************/
 /*
  * Delete key & value pair associated with input key
- * If current tree is empty, return immdiately.
+ * If current tree is empty, return immediately.
  * If not, User needs to first find the right leaf page as deletion target, then
  * delete entry from leaf page. Remember to deal with redistribute or merge if
  * necessary.
@@ -260,6 +260,8 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
     if (IsEmpty()) return;
 
     // delete data from corresponding page
+    LockRoot();
+    // leaf page is WLatched and is added to transaction PageSet
     B_PLUS_TREE_LEAF_PAGE_TYPE* leaf_page_data = FindLeafPage(key, transaction, Mode::DELETE, false);
     const int page_size_after_deletion = leaf_page_data->RemoveAndDeleteRecord(key, comparator_);
 
@@ -269,9 +271,12 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
         need_to_delete = CoalesceOrRedistribute<B_PLUS_TREE_LEAF_PAGE_TYPE>(leaf_page_data, transaction);
     }
 
-    // unpin the leaf page
-    buffer_pool_manager_->UnpinPage(leaf_page_data->GetPageId(), true);
-    if (need_to_delete) buffer_pool_manager_->DeletePage(leaf_page_data->GetPageId());
+    // if the leaf page needs to be deleted, add it to the transaction's page set
+    if (need_to_delete) transaction->AddIntoDeletedPageSet(leaf_page_data->GetPageId());
+
+    // unlock and unpin all pages
+    ReleaseAllLocksFromTransaction(transaction, Mode::DELETE);
+
 }
 
 /*
@@ -284,6 +289,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
 INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
 bool BPLUSTREE_TYPE::CoalesceOrRedistribute(N *&node, Transaction *transaction) {
+    // the node is already WLatched and is added to transaction PageSet
     if (node->GetSize() >= node->GetMinSize()) {
         return false;
     }
@@ -294,29 +300,36 @@ bool BPLUSTREE_TYPE::CoalesceOrRedistribute(N *&node, Transaction *transaction) 
     }
 
     // get the sibling: if has left sibling then get left sibling, otherwise get right sibling
+    // since we are dealing with current page, it is guaranteed the parent page is also locked
+    // There is still possibility that the sibling is being updated by other pages, such as a safe insert on sibling page
+    // Therefore, we also need to lock the sibling page
     const page_id_t parent_page_id = node->GetParentPageId();
     auto parent_page_data = reinterpret_cast<BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>*>(buffer_pool_manager_->FetchPage(parent_page_id)->GetData());
     const int node_index_in_parent = parent_page_data->ValueIndex(node->GetPageId());
     page_id_t sibling_page_id;
     if (node_index_in_parent > 0) sibling_page_id = parent_page_data->ValueAt(node_index_in_parent-1);
     else sibling_page_id = parent_page_data->ValueAt(node_index_in_parent+1);
-    auto sibling = reinterpret_cast<N*>(buffer_pool_manager_->FetchPage(sibling_page_id)->GetData());
+    auto sibling_page = buffer_pool_manager_->FetchPage(sibling_page_id);
+    auto sibling_page_data = reinterpret_cast<N*>(sibling_page->GetData());
+
+    // also need to lock the sibling
+    LockPage(sibling_page, transaction, Mode::DELETE);
 
     // if total number of nodes smaller than MaxSize(), then coalesce
     bool need_to_delete;
     bool parent_need_to_delete;
-    if (sibling->GetSize() + node->GetSize() <= node->GetMaxSize()) {
-        parent_need_to_delete = Coalesce(sibling, node, parent_page_data, node_index_in_parent, transaction);
+    if (sibling_page_data->GetSize() + node->GetSize() <= node->GetMaxSize()) {
+        parent_need_to_delete = Coalesce(sibling_page_data, node, parent_page_data, node_index_in_parent, transaction);
         need_to_delete = true;
     } else { // greater or equal than MaxSize(), redistribute
-        Redistribute(sibling, node, node_index_in_parent);
+        Redistribute(sibling_page_data, node, node_index_in_parent);
         parent_need_to_delete = false;
         need_to_delete = false;
     }
 
-    buffer_pool_manager_->UnpinPage(sibling_page_id, true);
+    // here the parent page is fetched again, so need to unpin again. On the other hand, the sibling page is fetched the first time, so no need to unpin
     buffer_pool_manager_->UnpinPage(parent_page_id, true);
-    if (parent_need_to_delete) buffer_pool_manager_->DeletePage(parent_page_data->GetPageId());
+    if (parent_need_to_delete) transaction->AddIntoDeletedPageSet(parent_page_id);
 
     return need_to_delete;
 
@@ -380,8 +393,11 @@ INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
 void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {
 
+    // it is guaranteed the node and neighbor_node are already latched
+
     // node is the first element of parent, hence node is to the left of neighbor_node
     // therefore borrow the first element from neighbor_node to node end
+    // TODO: might need to latch when calling the methods below
     if (index == 0) {
         neighbor_node->MoveFirstToEndOf(node, buffer_pool_manager_);
     // node is to the right of neighbor_node, hence borrow the last element from neighbor
@@ -389,6 +405,8 @@ void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {
         const int neighbor_node_index = index - 1;
         neighbor_node->MoveLastToFrontOf(node, neighbor_node_index, buffer_pool_manager_);
     }
+
+    // the neighbor_node and node maintain their latching condition
 
 }
 /*
@@ -419,6 +437,7 @@ bool BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root_node) {
         UpdateRootPageId();
 
         // set the parent id of the new root page
+        // TODO: might need to latch the child page
         Page* child_page = buffer_pool_manager_->FetchPage(child_page_id);
         auto child_page_data = reinterpret_cast<BPlusTreePage*>(child_page->GetData());
         child_page_data->SetParentPageId(INVALID_PAGE_ID);
@@ -543,8 +562,8 @@ void BPLUSTREE_TYPE::LockRoot() {
 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::UnlockRoot() {
-    root_lock_.unlock();
     root_locked_ = false;
+    root_lock_.unlock();
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -581,16 +600,24 @@ void BPLUSTREE_TYPE::ReleaseAllLocksFromTransaction(Transaction* transaction, co
 
     // unlock and unpin all pages
     if (mode == Mode::LOOKUP) {
+        bool root_unlocked = false;
         for (auto iterator = page_set->begin(); iterator != page_set->end(); iterator++) {
             auto page_data = reinterpret_cast<BPlusTreePage*>((*iterator)->GetData());
-            if (page_data->IsRootPage()) UnlockRoot();
+            if (page_data->IsRootPage() && !root_unlocked) {
+                UnlockRoot();
+                root_unlocked = true;
+            }
             (*iterator)->RUnlatch();
             buffer_pool_manager_->UnpinPage((*iterator)->GetPageId(), false);
         }
     } else {
+        bool root_unlocked = false;
         for (auto iterator = page_set->begin(); iterator != page_set->end(); iterator++) {
             auto page_data = reinterpret_cast<BPlusTreePage*>((*iterator)->GetData());
-            if (page_data->IsRootPage()) UnlockRoot();
+            if (page_data->IsRootPage() && !root_unlocked) {
+                UnlockRoot();
+                root_unlocked = true;
+            }
             (*iterator)->WUnlatch();
             buffer_pool_manager_->UnpinPage((*iterator)->GetPageId(), true); // TODO: probably better to set is_dirty to false
         }
@@ -598,6 +625,16 @@ void BPLUSTREE_TYPE::ReleaseAllLocksFromTransaction(Transaction* transaction, co
 
     // clear the pages from transaction
     page_set->clear();
+
+    // delete pages in DELETE mode
+    if (mode == Mode::DELETE) {
+        auto delete_page_set = transaction->GetDeletedPageSet();
+        for (auto iterator = delete_page_set->begin(); iterator != delete_page_set->end(); iterator++) {
+            buffer_pool_manager_->DeletePage(*iterator);
+        }
+        delete_page_set->clear();
+    }
+
 
 }
 

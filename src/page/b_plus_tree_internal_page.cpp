@@ -257,7 +257,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyAllFrom(
  *****************************************************************************/
 /*
  * Remove the first key & value pair from this page to tail of "recipient"
- * page, then update relavent key & value pair in its parent page.
+ * page, then update relevant key & value pair in its parent page.
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveFirstToEndOf(

@@ -237,7 +237,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyAllFrom(MappingType *items, int size) {
  *****************************************************************************/
 /*
  * Remove the first key & value pair from this page to "recipient" page, then
- * update relavent key & value pair in its parent page.
+ * update relevant key & value pair in its parent page.
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveFirstToEndOf(
@@ -271,7 +271,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyLastFrom(const MappingType &item) {
 }
 /*
  * Remove the last key & value pair from this page to "recipient" page, then
- * update relavent key & value pair in its parent page.
+ * update relevant key & value pair in its parent page.
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveLastToFrontOf(
