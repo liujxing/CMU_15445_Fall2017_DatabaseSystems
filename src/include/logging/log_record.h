@@ -1,8 +1,8 @@
 /**
  * log_record.h
- * For every write opeartion on table page, you should write ahead a
+ * For every write operation on table page, you should write ahead a
  * corresponding log record.
- * For EACH log record, HEADER is like (5 fields in common, 20 bytes in totoal)
+ * For EACH log record, HEADER is like (5 fields in common, 20 bytes in total)
  *-------------------------------------------------------------
  * | size | LSN | transID | prevLSN | LogType |
  *-------------------------------------------------------------
@@ -143,20 +143,20 @@ private:
   lsn_t prev_lsn_ = INVALID_LSN;
   LogRecordType log_record_type_ = LogRecordType::INVALID;
 
-  // case1: for delete opeartion, delete_tuple_ for UNDO opeartion
+  // case1: for delete operation, delete_tuple_ for UNDO operation
   RID delete_rid_;
   Tuple delete_tuple_;
 
-  // case2: for insert opeartion
+  // case2: for insert operation
   RID insert_rid_;
   Tuple insert_tuple_;
 
-  // case3: for update opeartion
+  // case3: for update operation
   RID update_rid_;
   Tuple old_tuple_;
   Tuple new_tuple_;
 
-  // case4: for new page opeartion
+  // case4: for new page operation
   page_id_t prev_page_id_ = INVALID_PAGE_ID;
   const static int HEADER_SIZE = 20;
 }; // namespace cmudb
