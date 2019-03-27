@@ -21,7 +21,7 @@ public:
   LogManager(DiskManager *disk_manager)
       : next_lsn_(0), persistent_lsn_(INVALID_LSN),
         disk_manager_(disk_manager) {
-    // TODO: you may intialize your own defined memeber variables here
+    // TODO: you may initialize your own defined member variables here
     log_buffer_ = new char[LOG_BUFFER_SIZE];
     flush_buffer_ = new char[LOG_BUFFER_SIZE];
   }
@@ -44,6 +44,8 @@ public:
   inline void SetPersistentLSN(lsn_t lsn) { persistent_lsn_ = lsn; }
   inline char *GetLogBuffer() { return log_buffer_; }
 
+  void ForceFlush(std::promise<void>* promise);
+
 private:
   // TODO: you may add your own member variables
   // also remember to change constructor accordingly
@@ -55,6 +57,8 @@ private:
   // log buffer related
   char *log_buffer_;
   char *flush_buffer_;
+  int log_buffer_offset_ = 0;
+  int flush_buffer_offset_ = 0;
   // latch to protect shared member variables
   std::mutex latch_;
   // flush thread
@@ -63,6 +67,15 @@ private:
   std::condition_variable cv_;
   // disk manager
   DiskManager *disk_manager_;
+
+  // swap the flush buffer and log buffer
+  void SwapBuffer();
+
+  // the largest lsn that is contained in log but has not been flushed yet
+  lsn_t flush_lsn_;
+
+  // promise to finish the flushing
+  std::promise<void>* promise_;
 };
 
 } // namespace cmudb

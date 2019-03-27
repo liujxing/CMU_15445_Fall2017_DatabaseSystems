@@ -13,6 +13,11 @@ Transaction *TransactionManager::Begin() {
 
   if (ENABLE_LOGGING) {
     // TODO: write log and update transaction's prev_lsn here
+    // create log for Begin
+    LogRecord log_record(txn->GetTransactionId(), txn->GetPrevLSN(), LogRecordType::BEGIN);
+    const lsn_t lsn = log_manager_->AppendLogRecord(log_record);
+    // update transaction's prev_lsn
+    txn->SetPrevLSN(lsn);
   }
 
   return txn;
@@ -35,6 +40,14 @@ void TransactionManager::Commit(Transaction *txn) {
 
   if (ENABLE_LOGGING) {
     // TODO: write log and update transaction's prev_lsn here
+    // create log for Commit
+    LogRecord log_record(txn->GetTransactionId(), txn->GetPrevLSN(), LogRecordType::COMMIT);
+    const lsn_t lsn = log_manager_->AppendLogRecord(log_record);
+    // update transaction's prev_lsn
+    txn->SetPrevLSN(lsn);
+
+    // TODO: make sure the log is flushed to disk
+
   }
 
   // release all the lock
@@ -72,6 +85,13 @@ void TransactionManager::Abort(Transaction *txn) {
 
   if (ENABLE_LOGGING) {
     // TODO: write log and update transaction's prev_lsn here
+    // create log record for abort
+    LogRecord log_record(txn->GetTransactionId(), txn->GetPrevLSN(), LogRecordType::ABORT);
+    const lsn_t lsn = log_manager_->AppendLogRecord(log_record);
+    // update transaction's prev_lsn
+    txn->SetPrevLSN(lsn);
+
+    // TODO: ensure the log is flushed
   }
 
   // release all the lock
